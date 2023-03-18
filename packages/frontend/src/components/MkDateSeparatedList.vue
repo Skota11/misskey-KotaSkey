@@ -172,14 +172,6 @@ export default defineComponent({
 
 .date-separated-list-nogap {
 	> * {
-		margin: 0 !important;
-		border: none;
-		border-radius: 0;
-		box-shadow: none;
-
-		&:not(:last-child) {
-			border-bottom: solid 0.5px var(--divider);
-		}
 	}
 }
 

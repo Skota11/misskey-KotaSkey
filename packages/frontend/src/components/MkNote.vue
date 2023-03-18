@@ -521,7 +521,6 @@ function showReactions(): void {
 }
 
 .tip + .article {
-	padding-top: 8px;
 }
 
 .replyTo {
@@ -538,7 +537,6 @@ function showReactions(): void {
 	color: var(--renote);
 
 	& + .article {
-		padding-top: 8px;
 	}
 }
 
@@ -609,6 +607,8 @@ function showReactions(): void {
 	position: relative;
 	display: flex;
 	padding: 28px 32px;
+	border-radius: var(--radius);
+	background: var(--panel);
 }
 
 .avatar {

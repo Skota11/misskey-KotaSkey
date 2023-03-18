@@ -49,7 +49,6 @@ defineExpose({
 .root {
 	&.noGap {
 		> .notes {
-			background: var(--panel);
 		}
 	}
 
@@ -58,8 +57,6 @@ defineExpose({
 			background: var(--bg);
 
 			.note {
-				background: var(--panel);
-				border-radius: var(--radius);
 			}
 		}
 	}

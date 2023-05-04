@@ -66,6 +66,10 @@ export const routes = [{
 		name: 'drive',
 		component: page(() => import('./pages/settings/drive.vue')),
 	}, {
+		path: '/drive/cleaner',
+		name: 'drive',
+		component: page(() => import('./pages/settings/drive-cleaner.vue')),
+	}, {
 		path: '/notifications',
 		name: 'notifications',
 		component: page(() => import('./pages/settings/notifications.vue')),
@@ -157,6 +161,10 @@ export const routes = [{
 		path: '/preferences-backups',
 		name: 'preferences-backups',
 		component: page(() => import('./pages/settings/preferences-backups.vue')),
+	}, {
+		path: '/migration',
+		name: 'migration',
+		component: page(() => import('./pages/settings/migration.vue'))
 	}, {
 		path: '/custom-css',
 		name: 'general',
@@ -419,6 +427,10 @@ export const routes = [{
 		path: '/other-settings',
 		name: 'other-settings',
 		component: page(() => import('./pages/admin/other-settings.vue')),
+	}, {
+		path: '/server-rules',
+		name: 'server-rules',
+		component: page(() => import('./pages/admin/server-rules.vue')),
 	}, {
 		path: '/',
 		component: page(() => import('./pages/_empty_.vue')),

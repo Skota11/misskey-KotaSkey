@@ -19,7 +19,7 @@
 				<div style="text-align: center;">
 					{{ i18n.ts._aboutMisskey.about }}<br><a href="https://misskey-hub.net/docs/misskey.html" target="_blank" class="_link">{{ i18n.ts.learnMore }}</a>
 				</div>
-				<div style="text-align: center;">
+				<div v-if="$i != null" style="text-align: center;">
 					<MkButton primary rounded inline @click="iLoveMisskey">I <Mfm text="$[jelly ❤]"/> #Misskey</MkButton>
 				</div>
 				<FormSection>
@@ -132,6 +132,15 @@ const patronsWithIcon = [{
 }, {
 	name: 'mollinaca',
 	icon: 'https://misskey-hub.net/patrons/ceb36b8f66e549bdadb3b90d5da62314.jpg',
+}, {
+	name: '坂本龍',
+	icon: 'https://misskey-hub.net/patrons/a631cf8b490145cf8dbbe4e7508cfbc2.jpg',
+}, {
+	name: 'takke',
+	icon: 'https://misskey-hub.net/patrons/6c3327e626c046f2914fbcd9f7557935.jpg',
+}, {
+	name: 'ぺんぎん',
+	icon: 'https://misskey-hub.net/patrons/6a652e0534ff4cb1836e7ce4968d76a7.jpg',
 }];
 
 const patrons = [
@@ -217,6 +226,14 @@ const patrons = [
 	'氷月氷華里',
 	'Ebise Lutica',
 	'巣黒るい@リスケモ男の娘VTuber!',
+	'ふぇいぽむ',
+	'依古田イコ',
+	'戸塚こだま',
+	'すー。',
+	'秋雨/Slime-hatena.jp',
+	'けそ',
+	'ずも',
+	'binvinyl',
 ];
 
 let thereIsTreasure = $ref($i && !claimedAchievements.includes('foundTreasure'));

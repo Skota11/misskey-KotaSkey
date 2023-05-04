@@ -1,9 +1,12 @@
+import * as assert from 'node:assert';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, basename } from 'node:path';
+import { inspect } from 'node:util';
 import WebSocket from 'ws';
 import fetch, { Blob, File, RequestInit } from 'node-fetch';
 import { DataSource } from 'typeorm';
 import { JSDOM } from 'jsdom';
+import { DEFAULT_POLICIES } from '@/core/RoleService.js';
 import { entities } from '../src/postgres.js';
 import { loadConfig } from '../src/config.js';
 import type * as misskey from 'misskey-js';
@@ -20,6 +23,36 @@ export const cookie = (me: any): string => {
 export const api = async (endpoint: string, params: any, me?: any) => {
 	const normalized = endpoint.replace(/^\//, '');
 	return await request(`api/${normalized}`, params, me);
+};
+
+export type ApiRequest = {
+	endpoint: string,
+	parameters: object,
+	user: object | undefined,
+};
+
+export const successfulApiCall = async <T, >(request: ApiRequest, assertion: {
+	status?: number,
+} = {}): Promise<T> => {
+	const { endpoint, parameters, user } = request;
+	const res = await api(endpoint, parameters, user);
+	const status = assertion.status ?? (res.body == null ? 204 : 200);
+	assert.strictEqual(res.status, status, inspect(res.body, { depth: 5, colors: true }));
+	return res.body;
+};
+
+export const failedApiCall = async <T, >(request: ApiRequest, assertion: {
+	status: number,
+	code: string,
+	id: string
+}): Promise<T> => {
+	const { endpoint, parameters, user } = request;
+	const { status, code, id } = assertion;
+	const res = await api(endpoint, parameters, user);
+	assert.strictEqual(res.status, status, inspect(res.body));
+	assert.strictEqual(res.body.error.code, code, inspect(res.body));
+	assert.strictEqual(res.body.error.id, id, inspect(res.body));
+	return res.body;
 };
 
 const request = async (path: string, params: any, me?: any): Promise<{ body: any, status: number }> => {
@@ -67,6 +100,21 @@ export const post = async (user: any, params?: misskey.Endpoints['notes/create']
 	const res = await api('notes/create', q, user);
 
 	return res.body ? res.body.createdNote : null;
+};
+
+// 非公開ノートをAPI越しに見たときのノート NoteEntityService.ts
+export const hiddenNote = (note: any): any => {
+	const temp = {
+		...note,
+		fileIds: [],
+		files: [],
+		text: null,
+		cw: null,
+		isHidden: true,
+	};
+	delete temp.visibleUserIds;
+	delete temp.poll;
+	return temp;
 };
 
 export const react = async (user: any, note: any, reaction: string): Promise<any> => {
@@ -137,6 +185,36 @@ export const channel = async (user: any, channel: any = {}): Promise<any> => {
 		description: null,
 		name: 'test',
 		...channel,
+	}, user);
+	return res.body;
+};
+
+export const role = async (user: any, role: any = {}, policies: any = {}): Promise<any> => {
+	const res = await api('admin/roles/create', {
+		asBadge: false,
+		canEditMembersByModerator: false,
+		color: null,
+		condFormula: {
+			id: 'ebef1684-672d-49b6-ad82-1b3ec3784f85',
+			type: 'isRemote',
+		},
+		description: '',
+		displayOrder: 0,
+		iconUrl: null,
+		isAdministrator: false,
+		isModerator: false,
+		isPublic: false,
+		name: 'New Role',
+		target: 'manual',
+		policies: { 
+			...Object.entries(DEFAULT_POLICIES).map(([k, v]) => [k, { 
+				priority: 0,
+				useDefault: true,
+				value: v,
+			}]),
+			...policies,
+		},
+		...role,
 	}, user);
 	return res.body;
 };

@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid';
 import sharp from 'sharp';
 import { sharpBmp } from 'sharp-read-bmp';
 import { IsNull } from 'typeorm';
+import { DeleteObjectCommandInput, PutObjectCommandInput, NoSuchKey } from '@aws-sdk/client-s3';
 import { DI } from '@/di-symbols.js';
 import type { DriveFilesRepository, UsersRepository, DriveFoldersRepository, UserProfilesRepository } from '@/models/index.js';
 import type { Config } from '@/config.js';
@@ -36,7 +37,6 @@ import { bindThis } from '@/decorators.js';
 import { RoleService } from '@/core/RoleService.js';
 import { correctFilename } from '@/misc/correct-filename.js';
 import { isMimeImage } from '@/misc/is-mime-image.js';
-import type S3 from 'aws-sdk/clients/s3.js';
 
 type AddFileArgs = {
 	/** User who wish to add file */
@@ -59,6 +59,8 @@ type AddFileArgs = {
 	uri?: string | null;
 	/** Mark file as sensitive */
 	sensitive?: boolean | null;
+	/** Extension to force */
+	ext?: string | null;
 
 	requestIp?: string | null;
 	requestHeaders?: Record<string, string> | null;
@@ -81,6 +83,7 @@ type UploadFromUrlArgs = {
 export class DriveService {
 	private registerLogger: Logger;
 	private downloaderLogger: Logger;
+	private deleteLogger: Logger;
 
 	constructor(
 		@Inject(DI.config)
@@ -118,12 +121,13 @@ export class DriveService {
 		const logger = new Logger('drive', 'blue');
 		this.registerLogger = logger.createSubLogger('register', 'yellow');
 		this.downloaderLogger = logger.createSubLogger('downloader');
+		this.deleteLogger = logger.createSubLogger('delete');
 	}
 
 	/***
 	 * Save file
 	 * @param path Path for original
-	 * @param name Name for original
+	 * @param name Name for original (should be extention corrected)
 	 * @param type Content-Type for original
 	 * @param hash Hash for original
 	 * @param size Size for original
@@ -149,7 +153,7 @@ export class DriveService {
 			}
 
 			// 拡張子からContent-Typeを設定してそうな挙動を示すオブジェクトストレージ (upcloud?) も存在するので、
-			// 許可されているファイル形式でしか拡張子をつけない
+			// 許可されているファイル形式でしかURLに拡張子をつけない
 			if (!FILE_TYPE_BROWSERSAFE.includes(type)) {
 				ext = '';
 			}
@@ -171,7 +175,7 @@ export class DriveService {
 			//#region Uploads
 			this.registerLogger.info(`uploading original: ${key}`);
 			const uploads = [
-				this.upload(key, fs.createReadStream(path), type, ext, name),
+				this.upload(key, fs.createReadStream(path), type, null, name),
 			];
 
 			if (alts.webpublic) {
@@ -187,7 +191,7 @@ export class DriveService {
 				thumbnailUrl = `${ baseUrl }/${ thumbnailKey }`;
 
 				this.registerLogger.info(`uploading thumbnail: ${thumbnailKey}`);
-				uploads.push(this.upload(thumbnailKey, alts.thumbnail.data, alts.thumbnail.type, alts.thumbnail.ext));
+				uploads.push(this.upload(thumbnailKey, alts.thumbnail.data, alts.thumbnail.type, alts.thumbnail.ext, `${name}.thumbnail`));
 			}
 
 			await Promise.all(uploads);
@@ -368,7 +372,7 @@ export class DriveService {
 			Body: stream,
 			ContentType: type,
 			CacheControl: 'max-age=31536000, immutable',
-		} as S3.PutObjectRequest;
+		} as PutObjectCommandInput;
 
 		if (filename) params.ContentDisposition = contentDisposition(
 			'inline',
@@ -378,29 +382,25 @@ export class DriveService {
 		);
 		if (meta.objectStorageSetPublicRead) params.ACL = 'public-read';
 
-		const s3 = this.s3Service.getS3(meta);
-
-		const upload = s3.upload(params, {
-			partSize: s3.endpoint.hostname === 'storage.googleapis.com' ? 500 * 1024 * 1024 : 8 * 1024 * 1024,
-		});
-
-		await upload.promise()
+		await this.s3Service.upload(meta, params)
 			.then(
 				result => {
-					if (result) {
+					if ('Bucket' in result) { // CompleteMultipartUploadCommandOutput
 						this.registerLogger.debug(`Uploaded: ${result.Bucket}/${result.Key} => ${result.Location}`);
-					} else {
-						this.registerLogger.error(`Upload Result Empty: key = ${key}, filename = ${filename}`);
+					} else { // AbortMultipartUploadCommandOutput
+						this.registerLogger.error(`Upload Result Aborted: key = ${key}, filename = ${filename}`);
 					}
-				},
+				})
+			.catch(
 				err => {
 					this.registerLogger.error(`Upload Failed: key = ${key}, filename = ${filename}`, err);
 				},
 			);
 	}
 
+	// Expire oldest file (without avatar or banner) of remote user
 	@bindThis
-	private async deleteOldFile(user: RemoteUser) {
+	private async expireOldFile(user: RemoteUser, driveCapacity: number) {
 		const q = this.driveFilesRepository.createQueryBuilder('file')
 			.where('file.userId = :userId', { userId: user.id })
 			.andWhere('file.isLink = FALSE');
@@ -413,12 +413,17 @@ export class DriveService {
 			q.andWhere('file.id != :bannerId', { bannerId: user.bannerId });
 		}
 
+		//This selete is hard coded, be careful if change database schema
+		q.addSelect('SUM("file"."size") OVER (ORDER BY "file"."id" DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)', 'acc_usage');
 		q.orderBy('file.id', 'ASC');
 
-		const oldFile = await q.getOne();
+		const fileList = await q.getRawMany();
+		const exceedFileIds = fileList.filter((x: any) => x.acc_usage > driveCapacity).map((x: any) => x.file_id);
 
-		if (oldFile) {
-			this.deleteFile(oldFile, true);
+		for (const fileId of exceedFileIds) {
+			const file = await this.driveFilesRepository.findOneBy({ id: fileId });
+			if (file == null) continue;
+			this.deleteFile(file, true);
 		}
 	}
 
@@ -440,6 +445,7 @@ export class DriveService {
 		sensitive = null,
 		requestIp = null,
 		requestHeaders = null,
+		ext = null,
 	}: AddFileArgs): Promise<DriveFile> {
 		let skipNsfwCheck = false;
 		const instance = await this.metaService.fetch();
@@ -471,7 +477,7 @@ export class DriveService {
 			// DriveFile.nameは256文字, validateFileNameは200文字制限であるため、
 			// extを付加してデータベースの文字数制限に当たることはまずない
 			(name && this.driveFileEntityService.validateFileName(name)) ? name : 'untitled',
-			info.type.ext,
+			ext ?? info.type.ext,
 		);
 
 		if (user && !force) {
@@ -492,22 +498,19 @@ export class DriveService {
 		//#region Check drive usage
 		if (user && !isLink) {
 			const usage = await this.driveFileEntityService.calcDriveUsageOf(user);
+			const isLocalUser = this.userEntityService.isLocalUser(user);
 
 			const policies = await this.roleService.getUserPolicies(user.id);
 			const driveCapacity = 1024 * 1024 * policies.driveCapacityMb;
 			this.registerLogger.debug('drive capacity override applied');
 			this.registerLogger.debug(`overrideCap: ${driveCapacity}bytes, usage: ${usage}bytes, u+s: ${usage + info.size}bytes`);
 
-			this.registerLogger.debug(`drive usage is ${usage} (max: ${driveCapacity})`);
-
 			// If usage limit exceeded
-			if (usage + info.size > driveCapacity) {
-				if (this.userEntityService.isLocalUser(user)) {
+			if (driveCapacity < usage + info.size) {
+				if (isLocalUser) {
 					throw new IdentifiableError('c6244ed2-a39a-4e1c-bf93-f0fbd7764fa6', 'No free space.');
-				} else {
-				// (アバターまたはバナーを含まず)最も古いファイルを削除する
-					this.deleteOldFile(await this.usersRepository.findOneByOrFail({ id: user.id }) as RemoteUser);
 				}
+				await this.expireOldFile(await this.usersRepository.findOneByOrFail({ id: user.id }) as RemoteUser, driveCapacity - info.size);
 			}
 		}
 		//#endregion
@@ -528,10 +531,10 @@ export class DriveService {
 		};
 
 		const properties: {
-		width?: number;
-		height?: number;
-		orientation?: number;
-	} = {};
+			width?: number;
+			height?: number;
+			orientation?: number;
+		} = {};
 
 		if (info.width) {
 			properties['width'] = info.width;
@@ -616,17 +619,20 @@ export class DriveService {
 
 		if (user) {
 			this.driveFileEntityService.pack(file, { self: true }).then(packedFile => {
-			// Publish driveFileCreated event
+				// Publish driveFileCreated event
 				this.globalEventService.publishMainStream(user.id, 'driveFileCreated', packedFile);
 				this.globalEventService.publishDriveStream(user.id, 'fileCreated', packedFile);
 			});
 		}
 
-		// 統計を更新
 		this.driveChart.update(file, true);
-		this.perUserDriveChart.update(file, true);
-		if (file.userHost !== null) {
-			this.instanceChart.updateDrive(file, true);
+		if (file.userHost == null) {
+			// ローカルユーザーのみ
+			this.perUserDriveChart.update(file, true);
+		} else {
+			if ((await this.metaService.fetch()).enableChartsForFederatedInstances) {
+				this.instanceChart.updateDrive(file, true);
+			}
 		}
 
 		return file;
@@ -692,7 +698,7 @@ export class DriveService {
 
 	@bindThis
 	private async deletePostProcess(file: DriveFile, isExpired = false) {
-	// リモートファイル期限切れ削除後は直リンクにする
+		// リモートファイル期限切れ削除後は直リンクにする
 		if (isExpired && file.userHost !== null && file.uri != null) {
 			this.driveFilesRepository.update(file.id, {
 				isLink: true,
@@ -709,33 +715,36 @@ export class DriveService {
 			this.driveFilesRepository.delete(file.id);
 		}
 
-		// 統計を更新
 		this.driveChart.update(file, false);
-		this.perUserDriveChart.update(file, false);
-		if (file.userHost !== null) {
-			this.instanceChart.updateDrive(file, false);
+		if (file.userHost == null) {
+			// ローカルユーザーのみ
+			this.perUserDriveChart.update(file, false);
+		} else {
+			if ((await this.metaService.fetch()).enableChartsForFederatedInstances) {
+				this.instanceChart.updateDrive(file, false);
+			}
 		}
 	}
 
 	@bindThis
 	public async deleteObjectStorageFile(key: string) {
 		const meta = await this.metaService.fetch();
-
-		const s3 = this.s3Service.getS3(meta);
-
 		try {
-			await s3.deleteObject({
-				Bucket: meta.objectStorageBucket!,
+			const param = {
+				Bucket: meta.objectStorageBucket,
 				Key: key,
-			}).promise();
+			} as DeleteObjectCommandInput;
+
+			await this.s3Service.delete(meta, param);
 		} catch (err: any) {
-			if (err.code === 'NoSuchKey') {
-				console.warn(`The object storage had no such key to delete: ${key}. Skipping this.`, err);
+			if (err.name === 'NoSuchKey') {
+				this.deleteLogger.warn(`The object storage had no such key to delete: ${key}. Skipping this.`, err as Error);
 				return;
+			} else {
+				throw new Error(`Failed to delete the file from the object storage with the given key: ${key}`, {
+					cause: err,
+				});
 			}
-			throw new Error(`Failed to delete the file from the object storage with the given key: ${key}`, {
-				cause: err,
-			});
 		}
 	}
 

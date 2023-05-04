@@ -42,11 +42,6 @@ export class Meta {
 	})
 	public disableRegistration: boolean;
 
-	@Column('boolean', {
-		default: false,
-	})
-	public useStarForReactionFallback: boolean;
-
 	@Column('varchar', {
 		length: 1024, array: true, default: '{}',
 	})
@@ -396,8 +391,30 @@ export class Meta {
 	})
 	public enableActiveEmailValidation: boolean;
 
+	@Column('boolean', {
+		default: true,
+	})
+	public enableChartsForRemoteUser: boolean;
+
+	@Column('boolean', {
+		default: true,
+	})
+	public enableChartsForFederatedInstances: boolean;
+
 	@Column('jsonb', {
 		default: { },
 	})
 	public policies: Record<string, any>;
+
+	@Column('varchar', {
+		length: 280,
+		array: true,
+		default: '{}',
+	})
+	public serverRules: string[];
+
+	@Column('varchar', {
+		length: 1024, array: true, default: '{ "admin", "administrator", "root", "system", "maintainer", "host", "mod", "moderator", "owner", "superuser", "staff", "auth", "i", "me", "everyone", "all", "mention", "mentions", "example", "user", "users", "account", "accounts", "official", "help", "helps", "support", "supports", "info", "information", "informations", "announce", "announces", "announcement", "announcements", "notice", "notification", "notifications", "dev", "developer", "developers", "tech", "misskey" }',
+	})
+	public preservedUsernames: string[];
 }

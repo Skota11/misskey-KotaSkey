@@ -12,6 +12,7 @@
 	<!--<div v-if="appearNote._prId_" class="tip"><i class="ti ti-speakerphone"></i> {{ i18n.ts.promotion }}<button class="_textButton hide" @click="readPromo()">{{ i18n.ts.hideThisNote }} <i class="ti ti-x"></i></button></div>-->
 	<!--<div v-if="appearNote._featuredId_" class="tip"><i class="ti ti-bolt"></i> {{ i18n.ts.featured }}</div>-->
 	<div v-if="isRenote" :class="$style.renote">
+		<div v-if="note.channel" :class="$style.colorBar" :style="{ background: note.channel.color }"></div>
 		<MkAvatar :class="$style.renoteAvatar" :user="note.user" link preview/>
 		<i class="ti ti-repeat" style="margin-right: 4px;"></i>
 		<I18n :src="i18n.ts.renotedBy" tag="span" :class="$style.renoteText">
@@ -31,7 +32,7 @@
 				<i v-else-if="note.visibility === 'followers'" class="ti ti-lock"></i>
 				<i v-else-if="note.visibility === 'specified'" ref="specified" class="ti ti-mail"></i>
 			</span>
-			<span v-if="note.localOnly" style="margin-left: 0.5em;" :title="i18n.ts._visibility['disableFederation']"><i class="ti ti-world-off"></i></span>
+			<span v-if="note.localOnly" style="margin-left: 0.5em;" :title="i18n.ts._visibility['disableFederation']"><i class="ti ti-rocket-off"></i></span>
 			<span v-if="note.channel" style="margin-left: 0.5em;" :title="note.channel.name"><i class="ti ti-device-tv"></i></span>
 		</div>
 	</div>
@@ -40,6 +41,7 @@
 		<Mfm :text="getNoteSummary(appearNote)" :plain="true" :nowrap="true" :author="appearNote.user" :class="$style.collapsedRenoteTargetText" @click="renoteCollapsed = false"/>
 	</div>
 	<article v-else :class="$style.article" @contextmenu.stop="onContextmenu">
+		<div v-if="appearNote.channel" :class="$style.colorBar" :style="{ background: appearNote.channel.color }"></div>
 		<MkAvatar :class="$style.avatar" :user="appearNote.user" link preview/>
 		<div :class="$style.main">
 			<MkNoteHeader :class="$style.header" :note="appearNote" :mini="true"/>
@@ -57,7 +59,7 @@
 						<div v-if="translating || translation" :class="$style.translation">
 							<MkLoading v-if="translating" mini/>
 							<div v-else :class="$style.translated">
-								<b>{{ $t('translatedFrom', { x: translation.sourceLang }) }}: </b>
+								<b>{{ i18n.t('translatedFrom', { x: translation.sourceLang }) }}: </b>
 								<Mfm :text="translation.text" :author="appearNote.user" :i="$i" :emoji-urls="appearNote.emojis"/>
 							</div>
 						</div>
@@ -109,6 +111,9 @@
 				<button v-if="appearNote.myReaction != null" ref="reactButton" :class="$style.footerButton" class="_button" @click="undoReact(appearNote)">
 					<i class="ti ti-minus"></i>
 				</button>
+				<button v-if="defaultStore.state.showClipButtonInNoteFooter" ref="clipButton" :class="$style.footerButton" class="_button" @mousedown="clip()">
+					<i class="ti ti-paperclip"></i>
+				</button>
 				<button ref="menuButton" :class="$style.footerButton" class="_button" @mousedown="menu()">
 					<i class="ti ti-dots"></i>
 				</button>
@@ -151,7 +156,7 @@ import { reactionPicker } from '@/scripts/reaction-picker';
 import { extractUrlFromMfm } from '@/scripts/extract-url-from-mfm';
 import { $i } from '@/account';
 import { i18n } from '@/i18n';
-import { getNoteMenu } from '@/scripts/get-note-menu';
+import { getNoteClipMenu, getNoteMenu } from '@/scripts/get-note-menu';
 import { useNoteCapture } from '@/scripts/use-note-capture';
 import { deepClone } from '@/scripts/clone';
 import { useTooltip } from '@/scripts/use-tooltip';
@@ -159,6 +164,7 @@ import { claimAchievement } from '@/scripts/achievements';
 import { getNoteSummary } from '@/scripts/get-note-summary';
 import { MenuItem } from '@/types/menu';
 import MkRippleEffect from '@/components/MkRippleEffect.vue';
+import { showMovedDialog } from '@/scripts/show-moved-dialog';
 
 const props = defineProps<{
 	note: misskey.entities.Note;
@@ -166,6 +172,7 @@ const props = defineProps<{
 }>();
 
 const inChannel = inject('inChannel', null);
+const currentClip = inject<Ref<misskey.entities.Clip> | null>('currentClip', null);
 
 let note = $ref(deepClone(props.note));
 
@@ -192,6 +199,7 @@ const menuButton = shallowRef<HTMLElement>();
 const renoteButton = shallowRef<HTMLElement>();
 const renoteTime = shallowRef<HTMLElement>();
 const reactButton = shallowRef<HTMLElement>();
+const clipButton = shallowRef<HTMLElement>();
 let appearNote = $computed(() => isRenote ? note.renote as misskey.entities.Note : note);
 const isMyRenote = $i && ($i.id === note.userId);
 const showContent = ref(false);
@@ -250,6 +258,7 @@ useTooltip(renoteButton, async (showing) => {
 
 function renote(viaKeyboard = false) {
 	pleaseLogin();
+	showMovedDialog();
 
 	let items = [] as MenuItem[];
 
@@ -330,6 +339,7 @@ function reply(viaKeyboard = false): void {
 
 function react(viaKeyboard = false): void {
 	pleaseLogin();
+	showMovedDialog();
 	if (appearNote.reactionAcceptance === 'likeOnly') {
 		os.api('notes/reactions/create', {
 			noteId: appearNote.id,
@@ -366,8 +376,6 @@ function undoReact(note): void {
 	});
 }
 
-const currentClipPage = inject<Ref<misskey.entities.Clip> | null>('currentClipPage', null);
-
 function onContextmenu(ev: MouseEvent): void {
 	const isLink = (el: HTMLElement) => {
 		if (el.tagName === 'A') return true;
@@ -382,18 +390,23 @@ function onContextmenu(ev: MouseEvent): void {
 		ev.preventDefault();
 		react();
 	} else {
-		os.contextMenu(getNoteMenu({ note: note, translating, translation, menuButton, isDeleted, currentClipPage }), ev).then(focus);
+		os.contextMenu(getNoteMenu({ note: note, translating, translation, menuButton, isDeleted, currentClip: currentClip?.value }), ev).then(focus);
 	}
 }
 
 function menu(viaKeyboard = false): void {
-	os.popupMenu(getNoteMenu({ note: note, translating, translation, menuButton, isDeleted, currentClipPage }), menuButton.value, {
+	os.popupMenu(getNoteMenu({ note: note, translating, translation, menuButton, isDeleted, currentClip: currentClip?.value }), menuButton.value, {
 		viaKeyboard,
 	}).then(focus);
 }
 
+async function clip() {
+	os.popupMenu(await getNoteClipMenu({ note: note, isDeleted, currentClip: currentClip?.value }), clipButton.value).then(focus);
+}
+
 function showRenoteMenu(viaKeyboard = false): void {
 	if (!isMyRenote) return;
+	pleaseLogin();
 	os.popupMenu([{
 		text: i18n.ts.unrenote,
 		icon: 'ti ti-trash',
@@ -477,6 +490,11 @@ function showReactions(): void {
 		}
 	}
 
+	.footer {
+		position: relative;
+		z-index: 1;
+	}
+
 	&:hover > .article > .main > .footer > .footerButton {
 		opacity: 1;
 	}
@@ -529,6 +547,7 @@ function showReactions(): void {
 }
 
 .renote {
+	position: relative;
 	display: flex;
 	align-items: center;
 	padding: 16px 32px 8px 32px;
@@ -537,6 +556,10 @@ function showReactions(): void {
 	color: var(--renote);
 
 	& + .article {
+	}
+
+	> .colorBar {
+		height: calc(100% - 6px);
 	}
 }
 
@@ -609,6 +632,16 @@ function showReactions(): void {
 	padding: 28px 32px;
 	border-radius: var(--radius);
 	background: var(--panel);
+}
+
+.colorBar {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	width: 5px;
+	height: calc(100% - 16px);
+	border-radius: 999px;
+	pointer-events: none;
 }
 
 .avatar {
@@ -825,6 +858,13 @@ function showReactions(): void {
 				margin-right: 12px;
 			}
 		}
+	}
+
+	.colorBar {
+		top: 6px;
+		left: 6px;
+		width: 4px;
+		height: calc(100% - 12px);
 	}
 }
 

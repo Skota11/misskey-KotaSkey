@@ -30,7 +30,7 @@
 				<i v-else-if="note.visibility === 'followers'" class="ti ti-lock"></i>
 				<i v-else-if="note.visibility === 'specified'" ref="specified" class="ti ti-mail"></i>
 			</span>
-			<span v-if="note.localOnly" style="margin-left: 0.5em;" :title="i18n.ts._visibility['disableFederation']"><i class="ti ti-world-off"></i></span>
+			<span v-if="note.localOnly" style="margin-left: 0.5em;" :title="i18n.ts._visibility['disableFederation']"><i class="ti ti-rocket-off"></i></span>
 		</div>
 	</div>
 	<article class="article" @contextmenu.stop="onContextmenu">
@@ -48,7 +48,7 @@
 							<i v-else-if="appearNote.visibility === 'followers'" class="ti ti-lock"></i>
 							<i v-else-if="appearNote.visibility === 'specified'" ref="specified" class="ti ti-mail"></i>
 						</span>
-						<span v-if="appearNote.localOnly" style="margin-left: 0.5em;" :title="i18n.ts._visibility['disableFederation']"><i class="ti ti-world-off"></i></span>
+						<span v-if="appearNote.localOnly" style="margin-left: 0.5em;" :title="i18n.ts._visibility['disableFederation']"><i class="ti ti-rocket-off"></i></span>
 					</div>
 				</div>
 				<div class="username"><MkAcct :user="appearNote.user"/></div>
@@ -70,7 +70,7 @@
 						<div v-if="translating || translation" class="translation">
 							<MkLoading v-if="translating" mini/>
 							<div v-else class="translated">
-								<b>{{ $t('translatedFrom', { x: translation.sourceLang }) }}: </b>
+								<b>{{ i18n.t('translatedFrom', { x: translation.sourceLang }) }}: </b>
 								<Mfm :text="translation.text" :author="appearNote.user" :i="$i" :emoji-urls="appearNote.emojis"/>
 							</div>
 						</div>
@@ -114,6 +114,9 @@
 				<button v-if="appearNote.myReaction != null" ref="reactButton" class="button _button reacted" @click="undoReact(appearNote)">
 					<i class="ti ti-minus"></i>
 				</button>
+				<button v-if="defaultStore.state.showClipButtonInNoteFooter" ref="clipButton" class="button _button" @mousedown="clip()">
+					<i class="ti ti-paperclip"></i>
+				</button>
 				<button ref="menuButton" class="button _button" @mousedown="menu()">
 					<i class="ti ti-dots"></i>
 				</button>
@@ -156,13 +159,14 @@ import { reactionPicker } from '@/scripts/reaction-picker';
 import { extractUrlFromMfm } from '@/scripts/extract-url-from-mfm';
 import { $i } from '@/account';
 import { i18n } from '@/i18n';
-import { getNoteMenu } from '@/scripts/get-note-menu';
+import { getNoteClipMenu, getNoteMenu } from '@/scripts/get-note-menu';
 import { useNoteCapture } from '@/scripts/use-note-capture';
 import { deepClone } from '@/scripts/clone';
 import { useTooltip } from '@/scripts/use-tooltip';
 import { claimAchievement } from '@/scripts/achievements';
 import { MenuItem } from '@/types/menu';
 import MkRippleEffect from '@/components/MkRippleEffect.vue';
+import { showMovedDialog } from '@/scripts/show-moved-dialog';
 
 const props = defineProps<{
 	note: misskey.entities.Note;
@@ -196,6 +200,7 @@ const menuButton = shallowRef<HTMLElement>();
 const renoteButton = shallowRef<HTMLElement>();
 const renoteTime = shallowRef<HTMLElement>();
 const reactButton = shallowRef<HTMLElement>();
+const clipButton = shallowRef<HTMLElement>();
 let appearNote = $computed(() => isRenote ? note.renote as misskey.entities.Note : note);
 const isMyRenote = $i && ($i.id === note.userId);
 const showContent = ref(false);
@@ -244,6 +249,7 @@ useTooltip(renoteButton, async (showing) => {
 
 function renote(viaKeyboard = false) {
 	pleaseLogin();
+	showMovedDialog();
 
 	let items = [] as MenuItem[];
 
@@ -314,6 +320,7 @@ function renote(viaKeyboard = false) {
 
 function reply(viaKeyboard = false): void {
 	pleaseLogin();
+	showMovedDialog();
 	os.post({
 		reply: appearNote,
 		animation: !viaKeyboard,
@@ -324,6 +331,7 @@ function reply(viaKeyboard = false): void {
 
 function react(viaKeyboard = false): void {
 	pleaseLogin();
+	showMovedDialog();
 	if (appearNote.reactionAcceptance === 'likeOnly') {
 		os.api('notes/reactions/create', {
 			noteId: appearNote.id,
@@ -384,8 +392,13 @@ function menu(viaKeyboard = false): void {
 	}).then(focus);
 }
 
+async function clip() {
+	os.popupMenu(await getNoteClipMenu({ note: note, isDeleted }), clipButton.value).then(focus);
+}
+
 function showRenoteMenu(viaKeyboard = false): void {
 	if (!isMyRenote) return;
+	pleaseLogin();
 	os.popupMenu([{
 		text: i18n.ts.unrenote,
 		icon: 'ti ti-trash',

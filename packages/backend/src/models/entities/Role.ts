@@ -54,6 +54,16 @@ type CondFormulaValueFollowingMoreThanOrEq = {
 	value: number;
 };
 
+type CondFormulaValueNotesLessThanOrEq = {
+	type: 'notesLessThanOrEq';
+	value: number;
+};
+
+type CondFormulaValueNotesMoreThanOrEq = {
+	type: 'notesMoreThanOrEq';
+	value: number;
+};
+
 export type RoleCondFormulaValue =
 	CondFormulaValueAnd |
 	CondFormulaValueOr |
@@ -65,7 +75,9 @@ export type RoleCondFormulaValue =
 	CondFormulaValueFollowersLessThanOrEq |
 	CondFormulaValueFollowersMoreThanOrEq |
 	CondFormulaValueFollowingLessThanOrEq |
-	CondFormulaValueFollowingMoreThanOrEq;
+	CondFormulaValueFollowingMoreThanOrEq |
+	CondFormulaValueNotesLessThanOrEq |
+	CondFormulaValueNotesMoreThanOrEq;
 
 @Entity()
 export class Role {
@@ -138,6 +150,11 @@ export class Role {
 		default: false,
 	})
 	public isAdministrator: boolean;
+
+	@Column('boolean', {
+		default: false,
+	})
+	public isExplorable: boolean;
 
 	@Column('boolean', {
 		default: false,
